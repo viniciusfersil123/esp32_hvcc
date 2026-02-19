@@ -1,3 +1,6 @@
 [submodule "hvcc"]
 	path = hvcc
 	url = git@github.com:enzienaudio/hvcc.git
+[submodule "lib/hvcc"]
+	path = lib/hvcc
+	url = git@github.com:Wasted-Audio/hvcc.git
