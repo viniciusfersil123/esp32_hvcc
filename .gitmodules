@@ -1,0 +1,3 @@
+[submodule "hvcc"]
+	path = hvcc
+	url = git@github.com:enzienaudio/hvcc.git
