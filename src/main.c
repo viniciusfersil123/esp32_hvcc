@@ -20,6 +20,7 @@
 #include "esp_log.h"
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
+#include "esp_adc/adc_oneshot.h"
 
 // Heavy (HVCC) generated Pure Data patch interface
 #include "output/c/Heavy_heavy.h"
@@ -45,6 +46,11 @@ static const char *TAG = "HVCC";
 #define I2S_DMA_DESC_COUNT      4       // number of DMA descriptors
 #define I2S_DMA_FRAME_COUNT     256     // samples per descriptor
 
+// Control Configuration
+#define ADC_KNOB_PIN            GPIO_NUM_33  // ADC1_CH5
+#define ADC_KNOB_RECEIVER       "knob1"      // PD receiver name
+#define CONTROL_POLL_RATE_MS    20           // Poll ADC every 20ms
+
 // ============================================================================
 // AUDIO SUBSYSTEM
 // ============================================================================
@@ -60,6 +66,8 @@ typedef struct {
     int num_output_channels;
     float *float_buffer;
     int16_t *output_buffer;
+    adc_oneshot_unit_handle_t adc_handle;
+    hv_uint32_t knob1_hash;
 } audio_system_t;
 
 static audio_system_t audio_sys = {0};
@@ -166,6 +174,46 @@ static bool audio_init_heavy(void) {
 }
 
 /**
+ * @brief Initialize ADC for control inputs (knobs)
+ * 
+ * Sets up ADC to read GPIO33 (ADC1_CH5) and connects to knob1 receiver
+ * 
+ * @return true on success, false on failure
+ */
+static bool audio_init_adc(void) {
+    ESP_LOGI(TAG, "Initializing ADC for knob control on GPIO33");
+    
+    // Create ADC unit
+    adc_oneshot_unit_init_cfg_t unit_cfg = {
+        .unit_id = ADC_UNIT_1,
+    };
+    
+    esp_err_t ret = adc_oneshot_new_unit(&unit_cfg, &audio_sys.adc_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create ADC unit: %s", esp_err_to_name(ret));
+        return false;
+    }
+    
+    // Configure ADC channel
+    adc_oneshot_chan_cfg_t chan_cfg = {
+        .bitwidth = ADC_BITWIDTH_12,
+        .atten = ADC_ATTEN_DB_12,
+    };
+    
+    ret = adc_oneshot_config_channel(audio_sys.adc_handle, ADC_CHANNEL_5, &chan_cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure ADC channel: %s", esp_err_to_name(ret));
+        return false;
+    }
+    
+    // Get hash for PD receiver
+    audio_sys.knob1_hash = hv_stringToHash(ADC_KNOB_RECEIVER);
+    
+    ESP_LOGI(TAG, "ADC initialized: GPIO33 -> %s receiver", ADC_KNOB_RECEIVER);
+    return true;
+}
+
+/**
  * @brief Clip audio sample to prevent distortion
  * 
  * @param sample Input sample value
@@ -201,6 +249,36 @@ static void audio_convert_to_i2s_format(const float *float_in, int16_t *int16_ou
         // Convert to int16 and interleave: [L, R, L, R, ...]
         int16_out[2 * i]     = (int16_t)(left * 32767.0f);
         int16_out[2 * i + 1] = (int16_t)(right * 32767.0f);
+    }
+}
+
+/**
+ * @brief Control input processing task
+ * 
+ * Polls ADC and sends knob values to Pure Data receivers
+ */
+static void control_task(void *arg) {
+    (void)arg;  // unused parameter
+    
+    ESP_LOGI(TAG, "Starting control input task");
+    
+    while (true) {
+        // Read ADC value from knob (GPIO33)
+        int adc_raw = 0;
+        esp_err_t ret = adc_oneshot_read(audio_sys.adc_handle, ADC_CHANNEL_5, &adc_raw);
+        
+        if (ret == ESP_OK) {
+            // Convert raw ADC (0-4095) to float (0.0-1.0)
+            float knob_value = (float)adc_raw / 4095.0f;
+            
+            // Send to Pure Data receiver
+            hv_sendFloatToReceiver(audio_sys.heavy_context, audio_sys.knob1_hash, knob_value);
+        } else {
+            ESP_LOGW(TAG, "ADC read failed: %s", esp_err_to_name(ret));
+        }
+        
+        // Poll at configured rate
+        vTaskDelay(pdMS_TO_TICKS(CONTROL_POLL_RATE_MS));
     }
 }
 
@@ -279,6 +357,14 @@ void app_main(void) {
     if (!audio_init_heavy()) {
         ESP_LOGE(TAG, "Heavy initialization failed - halting");
         return;
+    }
+    
+    // Initialize ADC for knob control
+    if (!audio_init_adc()) {
+        ESP_LOGW(TAG, "ADC initialization failed - controls will not work");
+    } else {
+        // Start control input task
+        xTaskCreate(control_task, "controls", 2048, NULL, 5, NULL);
     }
     
     ESP_LOGI(TAG, "All systems ready - starting audio output");
