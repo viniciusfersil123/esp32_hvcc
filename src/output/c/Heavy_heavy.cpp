@@ -83,8 +83,8 @@ extern "C" {
 
 Heavy_heavy::Heavy_heavy(double sampleRate, int poolKb, int inQueueKb, int outQueueKb)
     : HeavyContext(sampleRate, poolKb, inQueueKb, outQueueKb) {
-  numBytes += sPhasor_k_init(&sPhasor_e9I8aWWK, 0.1f, sampleRate);
-  numBytes += sPhasor_init(&sPhasor_bcHkrLmj, sampleRate);
+  numBytes += sPhasor_k_init(&sPhasor_Vd26YdQf, 0.1f, sampleRate);
+  numBytes += sPhasor_init(&sPhasor_h8QKbg3j, sampleRate);
   
 }
 
@@ -98,8 +98,8 @@ HvTable *Heavy_heavy::getTableForHash(hv_uint32_t tableHash) {
 
 void Heavy_heavy::scheduleMessageForReceiver(hv_uint32_t receiverHash, HvMessage *m) {
   switch (receiverHash) {
-    case 0x3A6EC41A: { // knob1
-      mq_addMessageByTimestamp(&mq, m, 0, &cReceive_HdMhQ6Gi_sendMessage);
+    case 0x17356E1C: { // knob2
+      mq_addMessageByTimestamp(&mq, m, 0, &cReceive_FQgSdUIp_sendMessage);
       break;
     }
     default: return;
@@ -130,12 +130,12 @@ int Heavy_heavy::getParameterInfo(int index, HvParameterInfo *info) {
  */
 
 
-void Heavy_heavy::cBinop_koDyGwHp_sendMessage(HeavyContextInterface *_c, int letIn, const HvMessage *m) {
-  sPhasor_k_onMessage(_c, &Context(_c)->sPhasor_e9I8aWWK, 0, m);
+void Heavy_heavy::cBinop_KQ7pcSGC_sendMessage(HeavyContextInterface *_c, int letIn, const HvMessage *m) {
+  sPhasor_k_onMessage(_c, &Context(_c)->sPhasor_Vd26YdQf, 0, m);
 }
 
-void Heavy_heavy::cReceive_HdMhQ6Gi_sendMessage(HeavyContextInterface *_c, int letIn, const HvMessage *m) {
-  cBinop_k_onMessage(_c, NULL, HV_BINOP_MULTIPLY, 20.0f, 0, m, &cBinop_koDyGwHp_sendMessage);
+void Heavy_heavy::cReceive_FQgSdUIp_sendMessage(HeavyContextInterface *_c, int letIn, const HvMessage *m) {
+  cBinop_k_onMessage(_c, NULL, HV_BINOP_MULTIPLY, 20.0f, 0, m, &cBinop_KQ7pcSGC_sendMessage);
 }
 
 
@@ -193,10 +193,10 @@ int Heavy_heavy::process(float **inputBuffers, float **outputBuffers, int n) {
     __hv_zero_f(VOf(O1));
 
     // process all signal functions
-    __hv_phasor_k_f(&sPhasor_e9I8aWWK, VOf(Bf0));
+    __hv_phasor_k_f(&sPhasor_Vd26YdQf, VOf(Bf0));
     __hv_var_k_f(VOf(Bf1), 1000.0f, 1000.0f, 1000.0f, 1000.0f, 1000.0f, 1000.0f, 1000.0f, 1000.0f);
     __hv_mul_f(VIf(Bf0), VIf(Bf1), VOf(Bf1));
-    __hv_phasor_f(&sPhasor_bcHkrLmj, VIf(Bf1), VOf(Bf1));
+    __hv_phasor_f(&sPhasor_h8QKbg3j, VIf(Bf1), VOf(Bf1));
     __hv_var_k_f(VOf(Bf0), 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     __hv_sub_f(VIf(Bf1), VIf(Bf0), VOf(Bf0));
     __hv_abs_f(VIf(Bf0), VOf(Bf0));
@@ -213,8 +213,8 @@ int Heavy_heavy::process(float **inputBuffers, float **outputBuffers, int n) {
     __hv_fma_f(VIf(Bf1), VIf(Bf3), VIf(Bf0), VOf(Bf0));
     __hv_var_k_f(VOf(Bf3), 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f);
     __hv_mul_f(VIf(Bf0), VIf(Bf3), VOf(Bf3));
-    __hv_add_f(VIf(Bf3), VIf(O0), VOf(O0));
     __hv_add_f(VIf(Bf3), VIf(O1), VOf(O1));
+    __hv_add_f(VIf(Bf3), VIf(O0), VOf(O0));
 
     // save output vars to output buffer
     __hv_store_f(outputBuffers[0]+n, VIf(O0));

@@ -1,0 +1,81 @@
+/**
+ * AUTO-GENERATED CONTROLS CODE
+ * Generated from board_config.json
+ * 
+ * This file is regenerated on each build - do not edit directly
+ */
+
+#ifndef GENERATED_CONTROLS_H
+#define GENERATED_CONTROLS_H
+
+#include <stdbool.h>
+#include "esp_adc/adc_oneshot.h"
+#include "output/c/HvHeavy.h"
+
+// ============================================================================
+// ADC CONTROL MAPPINGS
+// ============================================================================
+
+{% for adc in adcs %}
+#define ADC_{{ adc.define_name }}_PIN           GPIO_NUM_{{ adc.pin }}
+#define ADC_{{ adc.define_name }}_UNIT          ADC_UNIT_{{ adc.adc_unit }}
+#define ADC_{{ adc.define_name }}_CHANNEL       ADC_CHANNEL_{{ adc.adc_channel }}
+#define ADC_{{ adc.define_name }}_RECEIVER      "{{ adc.receiver }}"
+#define ADC_{{ adc.define_name }}_DESCRIPTION  "{{ adc.description }}"
+{% endfor %}
+
+#define NUM_ADCS {{ adcs | length }}
+
+{% if adcs | length > 0 %}
+// ADC configuration structures
+typedef struct {
+    adc_channel_t channel;
+    const char *receiver;
+    const char *name;
+    hv_uint32_t hash;
+} adc_control_t;
+
+extern adc_control_t adc_controls[NUM_ADCS];
+extern adc_oneshot_unit_handle_t adc_handle;
+
+// ============================================================================
+// ADC CONTROL FUNCTIONS
+// ============================================================================
+
+/**
+ * @brief Initialize all ADC controls
+ * 
+ * Configures ADC units and channels for control inputs
+ * 
+ * @param hv_ctx Heavy context for receiver hashing
+ * @return true on success, false on failure
+ */
+bool controls_init_adc(HeavyContextInterface *hv_ctx);
+
+/**
+ * @brief ADC polling task
+ * 
+ * Reads ADC values and sends to Pure Data receivers
+ * 
+ * @param arg Unused
+ */
+void controls_task(void *arg);
+
+{% endif %}
+
+{% if buttons | length > 0 %}
+// ============================================================================
+// BUTTON CONTROL MAPPINGS
+// ============================================================================
+
+{% for btn in buttons %}
+#define BTN_{{ btn.name | upper }}_PIN          GPIO_NUM_{{ btn.pin }}
+#define BTN_{{ btn.name | upper }}_RECEIVER     "{{ btn.receiver }}"
+#define BTN_{{ btn.name | upper }}_INVERT       {{ btn.invert | default(1) }}
+{% endfor %}
+
+#define NUM_BUTTONS {{ buttons | length }}
+
+{% endif %}
+
+#endif // GENERATED_CONTROLS_H

@@ -1,0 +1,116 @@
+/**
+ * AUTO-GENERATED CONTROLS IMPLEMENTATION
+ * Generated from board_config.json
+ * 
+ * This file is regenerated on each build - do not edit directly
+ */
+
+#include "controls_generated.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/gpio.h"
+#include "esp_adc/adc_oneshot.h"
+
+static const char *TAG = "Controls";
+
+// ============================================================================
+// ADC CONTROL DATA
+// ============================================================================
+
+
+adc_oneshot_unit_handle_t adc_handle = NULL;
+
+adc_control_t adc_controls[NUM_ADCS] = {
+
+    {
+        .channel = ADC_KNOB1_CHANNEL,
+        .receiver = ADC_KNOB1_RECEIVER,
+        .name = "knob1",
+        .hash = 0,  // Will be set during init
+    },
+
+};
+
+/**
+ * @brief Initialize all ADC controls
+ */
+bool controls_init_adc(HeavyContextInterface *hv_ctx) {
+    ESP_LOGI(TAG, "Initializing %d ADC control(s)", NUM_ADCS);
+    
+    if (NUM_ADCS == 0) {
+        ESP_LOGW(TAG, "No ADC controls configured");
+        return true;
+    }
+    
+    // Create ADC unit
+    adc_oneshot_unit_init_cfg_t unit_cfg = {
+        .unit_id = ADC_UNIT_1,
+    };
+    
+    esp_err_t ret = adc_oneshot_new_unit(&unit_cfg, &adc_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create ADC unit: %s", esp_err_to_name(ret));
+        return false;
+    }
+    
+    // Configure each ADC channel
+    for (int i = 0; i < NUM_ADCS; i++) {
+        adc_oneshot_chan_cfg_t chan_cfg = {
+            .bitwidth = ADC_BITWIDTH_12,
+            .atten = ADC_ATTEN_DB_12,
+        };
+        
+        ret = adc_oneshot_config_channel(adc_handle, adc_controls[i].channel, &chan_cfg);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to configure ADC channel %d: %s", 
+                     adc_controls[i].channel, esp_err_to_name(ret));
+            return false;
+        }
+        
+        // Pre-compute receiver hashes
+        adc_controls[i].hash = hv_stringToHash(adc_controls[i].receiver);
+        
+        ESP_LOGI(TAG, "  [%d] %s -> %s (GPIO%d)", 
+                 i, adc_controls[i].name, adc_controls[i].receiver,
+
+                 i == 0 ? 33 :
+
+                 0);
+    }
+    
+    ESP_LOGI(TAG, "ADC controls initialized");
+    return true;
+}
+
+/**
+ * @brief ADC polling task
+ */
+void controls_task(void *arg) {
+    HeavyContextInterface *hv_ctx = (HeavyContextInterface *)arg;
+    
+    ESP_LOGI(TAG, "Starting ADC polling task");
+    
+    while (true) {
+        // Poll each ADC
+        for (int i = 0; i < NUM_ADCS; i++) {
+            int adc_raw = 0;
+            esp_err_t ret = adc_oneshot_read(adc_handle, adc_controls[i].channel, &adc_raw);
+            
+            if (ret == ESP_OK) {
+                // Convert raw (0-4095) to float (0.0-1.0)
+                float value = (float)adc_raw / 4095.0f;
+                
+                // Send to Pure Data receiver
+                hv_sendFloatToReceiver(hv_ctx, adc_controls[i].hash, value);
+            } else {
+                ESP_LOGW(TAG, "ADC read failed for %s: %s", 
+                         adc_controls[i].name, esp_err_to_name(ret));
+            }
+        }
+        
+        // Poll rate
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+

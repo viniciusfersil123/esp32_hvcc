@@ -1,6 +1,7 @@
 """
 Pre-build script for PlatformIO
 Compiles Pure Data patch using hvcc before building the firmware
+Generates controls code from board_config.json
 """
 import os
 import shutil
@@ -28,6 +29,43 @@ def fix_esp32_compatibility(output_dir):
         print("✓ Applied format specifier fix (uint32_t)")
     else:
         print(f"WARNING: {hvmessage_file} not found for patching")
+
+def generate_controls_code(project_dir):
+    """Generate controls code from board_config.json"""
+    
+    print("Generating controls code from board_config.json...")
+    
+    config_file = project_dir / 'board_config.json'
+    if not config_file.exists():
+        print(f"WARNING: {config_file} not found - skipping controls generation")
+        return
+    
+    # Run the code generator
+    try:
+        import sys
+        sys.path.insert(0, str(project_dir))
+        
+        # Import and run the generator
+        spec = __import__('importlib.util').util.spec_from_file_location(
+            "generate_controls", str(project_dir / 'generate_controls.py')
+        )
+        generator = __import__('importlib.util').util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        
+        success = generator.generate_controls_code(str(config_file), str(project_dir / 'src'))
+        
+        if success:
+            print("✓ Controls code generated successfully")
+        else:
+            print("ERROR: Controls code generation failed")
+            
+    except ImportError as e:
+        print(f"WARNING: Could not import jinja2: {e}")
+        print("Install with: pip3 install jinja2")
+    except Exception as e:
+        print(f"ERROR: Failed to generate controls code: {e}")
+        import traceback
+        traceback.print_exc()
 
 def compile_pd_patch(*args, **kwargs):
     """Compile Pure Data patch with hvcc"""
@@ -108,6 +146,10 @@ def compile_pd_patch(*args, **kwargs):
         print("PRE-BUILD: Complete - all HVCC files will be recompiled")
         print("=" * 60)
         print("")
+        
+        # Generate controls code after HVCC compilation
+        print("")
+        generate_controls_code(project_dir)
         
     except subprocess.CalledProcessError as e:
         print("=" * 60)
