@@ -64,5 +64,31 @@ void controls_task(void *arg);
 
 
 
+// ============================================================================
+// BUTTON CONTROL MAPPINGS
+// ============================================================================
+
+
+#define BTN_BUTTON1_PIN          GPIO_NUM_32
+#define BTN_BUTTON1_RECEIVER     "button1"
+#define BTN_BUTTON1_INVERT       1
+
+
+
+
+#define NUM_BUTTONS 1
+
+// ============================================================================
+// BUTTON CONTROL FUNCTIONS
+// ============================================================================
+
+/**
+ * @brief Initialize all button controls
+ * 
+ * Configures GPIOs for button inputs
+ * 
+ * @return true on success, false on failure
+ */
+bool controls_init_buttons(void);
 
 #endif // GENERATED_CONTROLS_H

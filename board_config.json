@@ -10,6 +10,13 @@
         "description": "Main knob control"
       }
     ],
-    "buttons": []
+    "buttons": [
+      {
+        "name": "button1",
+        "pin": 32,
+        "receiver": "button1",
+        "invert": 1
+      }
+    ]
   }
 }

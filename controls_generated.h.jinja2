@@ -74,8 +74,21 @@ void controls_task(void *arg);
 #define BTN_{{ btn.name | upper }}_INVERT       {{ btn.invert | default(1) }}
 {% endfor %}
 
+{% endif %}
+
 #define NUM_BUTTONS {{ buttons | length }}
 
-{% endif %}
+// ============================================================================
+// BUTTON CONTROL FUNCTIONS
+// ============================================================================
+
+/**
+ * @brief Initialize all button controls
+ * 
+ * Configures GPIOs for button inputs
+ * 
+ * @return true on success, false on failure
+ */
+bool controls_init_buttons(void);
 
 #endif // GENERATED_CONTROLS_H

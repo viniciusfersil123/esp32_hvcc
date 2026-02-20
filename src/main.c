@@ -312,12 +312,22 @@ void app_main(void) {
         return;
     }
     
-    // Initialize ADC for knob control
-    if (!audio_init_adc()) {
-        ESP_LOGW(TAG, "ADC initialization failed - controls will not work");
-    } else {
+    // Initialize ADC and button controls
+    bool adc_ok = audio_init_adc();
+    bool btn_ok = controls_init_buttons();
+
+    if (!adc_ok) {
+        ESP_LOGW(TAG, "ADC initialization failed - knob controls may not work");
+    }
+    if (!btn_ok) {
+        ESP_LOGW(TAG, "Button initialization failed - button controls may not work");
+    }
+
+    if (adc_ok || btn_ok) {
         // Start control input task with Heavy context
         xTaskCreate(control_task, "controls", 2048, audio_sys.heavy_context, 5, NULL);
+    } else {
+        ESP_LOGW(TAG, "No controls initialized - skipping controls task");
     }
     
     ESP_LOGI(TAG, "All systems ready - starting audio output");
