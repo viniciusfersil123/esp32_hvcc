@@ -14,6 +14,8 @@
 
 #include <stdio.h>
 #include <stdbool.h>
+#include <math.h>
+#include <string.h>
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -21,6 +23,7 @@
 #include "driver/i2s_std.h"
 #include "driver/gpio.h"
 #include "esp_adc/adc_oneshot.h"
+#include "cJSON.h"
 
 // Heavy (HVCC) generated Pure Data patch interface
 #include "output/c/Heavy_heavy.h"
@@ -238,18 +241,116 @@ static void control_task(void *arg) {
     controls_task(arg);
 }
 
+// OLED configuration loaded from JSON
+static oled_config_t oled_config = {0};
+static hv_uint32_t oled_table_hashes[OLED_MAX_DISPLAYS] = {0};
+
+/**
+ * @brief Load OLED configuration from embedded board_config.json
+ */
+extern const char board_config_json_start[];
+extern const char board_config_json_end[];
+
+static bool load_oled_config(void) {
+    const char *json_str = board_config_json_start;
+    size_t json_len = strlen(json_str);
+    
+    ESP_LOGI(TAG, "Loading OLED config from JSON (%u bytes)...", json_len);
+    
+    cJSON *root = cJSON_ParseWithLength(json_str, json_len);
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to parse board_config.json");
+        return false;
+    }
+    
+    cJSON *oled = cJSON_GetObjectItem(root, "oled");
+    if (!oled) {
+        ESP_LOGW(TAG, "No 'oled' section in config - using defaults");
+        cJSON_Delete(root);
+        return false;
+    }
+    
+    // Parse SPI pins
+    cJSON *spi = cJSON_GetObjectItem(oled, "spi");
+    if (spi) {
+        oled_config.mosi_pin = cJSON_GetObjectItem(spi, "mosi")->valueint;
+        oled_config.clk_pin = cJSON_GetObjectItem(spi, "clk")->valueint;
+        oled_config.dc_pin = cJSON_GetObjectItem(spi, "dc")->valueint;
+        oled_config.rst_pin = cJSON_GetObjectItem(spi, "rst")->valueint;
+    } else {
+        ESP_LOGE(TAG, "Missing 'spi' section in OLED config");
+        cJSON_Delete(root);
+        return false;
+    }
+    
+    // Parse displays
+    cJSON *displays = cJSON_GetObjectItem(oled, "displays");
+    if (!displays || !cJSON_IsArray(displays)) {
+        ESP_LOGE(TAG, "Missing or invalid 'displays' array");
+        cJSON_Delete(root);
+        return false;
+    }
+    
+    int num_displays = cJSON_GetArraySize(displays);
+    if (num_displays > OLED_MAX_DISPLAYS) {
+        num_displays = OLED_MAX_DISPLAYS;
+    }
+    oled_config.num_displays = num_displays;
+    
+    for (int i = 0; i < num_displays; i++) {
+        cJSON *disp = cJSON_GetArrayItem(displays, i);
+        oled_display_config_t *disp_cfg = &oled_config.displays[i];
+        
+        disp_cfg->id = cJSON_GetObjectItem(disp, "id")->valueint;
+        disp_cfg->cs_pin = cJSON_GetObjectItem(disp, "cs_pin")->valueint;
+        
+        cJSON *table_name = cJSON_GetObjectItem(disp, "table_name");
+        if (table_name && cJSON_IsString(table_name) && table_name->valuestring) {
+            strncpy(disp_cfg->table_name, table_name->valuestring, sizeof(disp_cfg->table_name) - 1);
+            disp_cfg->table_name[sizeof(disp_cfg->table_name) - 1] = '\0';
+            
+            // Pre-compute hash for this table
+            if (disp_cfg->table_name[0] != '\0') {
+                oled_table_hashes[i] = hv_stringToHash(disp_cfg->table_name);
+                ESP_LOGI(TAG, "Display %d: table '%s' hash = 0x%08lx", 
+                         i, disp_cfg->table_name, oled_table_hashes[i]);
+            }
+        } else {
+            disp_cfg->table_name[0] = '\0';
+        }
+    }
+    
+    cJSON_Delete(root);
+    
+    ESP_LOGI(TAG, "OLED config loaded: %d display(s)", oled_config.num_displays);
+    return true;
+}
+
 /**
  * @brief OLED display update task
  * 
  * Periodically updates both OLED displays with Hello World and random info
  */
 static void oled_task(void *arg) {
-    ESP_LOGI(TAG, "OLED task started - updating 2 displays every 1 second");
+    ESP_LOGI(TAG, "OLED task started - updating %d displays every 1 second", oled_config.num_displays);
     
     while (true) {
-        // Update both displays
-        oled_update_display(OLED_DISPLAY_1);
-        oled_update_display(OLED_DISPLAY_2);
+        // Update each display
+        for (uint8_t i = 0; i < oled_config.num_displays; i++) {
+            const oled_display_config_t *disp = &oled_config.displays[i];
+            
+            // If this display has a table assigned, read it
+            if (disp->table_name[0] != '\0' && oled_table_hashes[i] != 0) {
+                float *table_buf = hv_table_getBuffer(audio_sys.heavy_context, oled_table_hashes[i]);
+                hv_uint32_t table_len = hv_table_getLength(audio_sys.heavy_context, oled_table_hashes[i]);
+                if (table_buf && table_len > 0) {
+                    oled_set_table_data(table_buf, table_len);
+                }
+            }
+            
+            oled_update_display(i);
+        }
+        
         vTaskDelay(pdMS_TO_TICKS(1000));  // Update every 1 second
     }
 }
@@ -280,6 +381,27 @@ static void audio_processing_loop(void) {
             vTaskDelay(pdMS_TO_TICKS(1));
             continue;
         }
+
+        // Compute audio levels for display 1
+        float sum_l = 0.0f;
+        float sum_r = 0.0f;
+        float peak = 0.0f;
+        for (int i = 0; i < frames_processed; i++) {
+            float left = audio_clip_sample(audio_sys.float_buffer[i]);
+            float right = (audio_sys.num_output_channels >= 2)
+                          ? audio_clip_sample(audio_sys.float_buffer[i + frames_processed])
+                          : left;
+            sum_l += left * left;
+            sum_r += right * right;
+
+            float abs_l = fabsf(left);
+            float abs_r = fabsf(right);
+            if (abs_l > peak) peak = abs_l;
+            if (abs_r > peak) peak = abs_r;
+        }
+        float rms_l = sqrtf(sum_l / (float)frames_processed);
+        float rms_r = sqrtf(sum_r / (float)frames_processed);
+        oled_set_audio_levels(rms_l, rms_r, peak);
         
         // Convert float to int16 and interleave for I2S
         audio_convert_to_i2s_format(
@@ -349,8 +471,8 @@ void app_main(void) {
         ESP_LOGW(TAG, "No controls initialized - skipping controls task");
     }
     
-    // Initialize and start OLED display
-    if (oled_init()) {
+    // Load OLED configuration and initialize display
+    if (load_oled_config() && oled_init(&oled_config)) {
         ESP_LOGI(TAG, "OLED display initialized - starting update task");
         xTaskCreate(oled_task, "oled_display", 4096, NULL, 3, NULL);
     } else {

@@ -15,25 +15,73 @@
 static const char *TAG = "OLED";
 
 // SPI device handles for both displays
-static spi_device_handle_t spi_device_1;
-static spi_device_handle_t spi_device_2;
+static spi_device_handle_t spi_devices[OLED_MAX_DISPLAYS] = {NULL, NULL};
 
 // Display buffers (one for each display)
-static uint8_t display_buffer_1[OLED_WIDTH * OLED_HEIGHT / 8];
-static uint8_t display_buffer_2[OLED_WIDTH * OLED_HEIGHT / 8];
+static uint8_t display_buffers[OLED_MAX_DISPLAYS][OLED_WIDTH * OLED_HEIGHT / 8];
 
+// Configuration and state
+static oled_config_t active_config;
 static bool is_initialized = false;
-static uint32_t update_counter_1 = 0;
-static uint32_t update_counter_2 = 0;
+static uint32_t update_counters[OLED_MAX_DISPLAYS] = {0, 0};
+static float audio_rms_left = 0.0f;
+static float audio_rms_right = 0.0f;
+static float audio_peak = 0.0f;
+static float table_cache[OLED_WIDTH] = {0.0f};
+static uint32_t table_cache_len = 0;
 
 // Get appropriate buffer for display ID
 static inline uint8_t *get_display_buffer(uint8_t display_id) {
-    return (display_id == OLED_DISPLAY_1) ? display_buffer_1 : display_buffer_2;
+    return (display_id < active_config.num_displays) ? display_buffers[display_id] : NULL;
 }
 
 // Get appropriate device handle for display ID
 static inline spi_device_handle_t get_spi_device(uint8_t display_id) {
-    return (display_id == OLED_DISPLAY_1) ? spi_device_1 : spi_device_2;
+    return (display_id < active_config.num_displays) ? spi_devices[display_id] : NULL;
+}
+
+static inline void oled_set_pixel(uint8_t *buffer, int x, int y, bool on) {
+    if (x < 0 || x >= OLED_WIDTH || y < 0 || y >= OLED_HEIGHT) {
+        return;
+    }
+    if (on) {
+        buffer[x + (y / 8) * OLED_WIDTH] |= (1 << (y % 8));
+    } else {
+        buffer[x + (y / 8) * OLED_WIDTH] &= ~(1 << (y % 8));
+    }
+}
+
+static void oled_draw_filled_rect(uint8_t *buffer, int x, int y, int w, int h) {
+    for (int yy = y; yy < y + h; yy++) {
+        for (int xx = x; xx < x + w; xx++) {
+            oled_set_pixel(buffer, xx, yy, true);
+        }
+    }
+}
+
+// Bresenham's line drawing algorithm
+static void oled_draw_line(uint8_t *buffer, int x0, int y0, int x1, int y1) {
+    int dx = abs(x1 - x0);
+    int dy = abs(y1 - y0);
+    int sx = (x0 < x1) ? 1 : -1;
+    int sy = (y0 < y1) ? 1 : -1;
+    int err = dx - dy;
+    
+    while (true) {
+        oled_set_pixel(buffer, x0, y0, true);
+        
+        if (x0 == x1 && y0 == y1) break;
+        
+        int e2 = 2 * err;
+        if (e2 > -dy) {
+            err -= dy;
+            x0 += sx;
+        }
+        if (e2 < dx) {
+            err += dx;
+            y0 += sy;
+        }
+    }
 }
 
 // 5x7 font (ASCII 32-127)
@@ -161,7 +209,7 @@ static const uint8_t font_5x7[][5] = {
 #define SSD1306_CHARGEPUMP          0x8D
 
 static void ssd1306_write_command(spi_device_handle_t device, uint8_t cmd) {
-    gpio_set_level((gpio_num_t)OLED_PIN_DC, 0);  // Command mode
+    gpio_set_level((gpio_num_t)active_config.dc_pin, 0);  // Command mode
     spi_transaction_t t = {};
     t.length = 8;
     t.tx_buffer = &cmd;
@@ -169,21 +217,57 @@ static void ssd1306_write_command(spi_device_handle_t device, uint8_t cmd) {
 }
 
 static void ssd1306_write_data(spi_device_handle_t device, const uint8_t *data, size_t len) {
-    gpio_set_level((gpio_num_t)OLED_PIN_DC, 1);  // Data mode
+    gpio_set_level((gpio_num_t)active_config.dc_pin, 1);  // Data mode
     spi_transaction_t t = {};
     t.length = len * 8;
     t.tx_buffer = data;
     spi_device_polling_transmit(device, &t);
 }
 
-bool oled_init(void) {
-    ESP_LOGI(TAG, "Initializing OLED displays (dual SPI)...");
-    ESP_LOGI(TAG, "Pins - MOSI:%d CLK:%d DC:%d RST:%d CS1:%d CS2:%d", 
-             OLED_PIN_MOSI, OLED_PIN_CLK, OLED_PIN_DC, OLED_PIN_RESET, OLED_PIN_CS1, OLED_PIN_CS2);
+static void ssd1306_init_display(spi_device_handle_t device) {
+    ssd1306_write_command(device, SSD1306_DISPLAYOFF);
+    ssd1306_write_command(device, SSD1306_SETDISPLAYCLOCKDIV);
+    ssd1306_write_command(device, 0x80);
+    ssd1306_write_command(device, SSD1306_SETMULTIPLEX);
+    ssd1306_write_command(device, 0x3F);
+    ssd1306_write_command(device, SSD1306_SETDISPLAYOFFSET);
+    ssd1306_write_command(device, 0x00);
+    ssd1306_write_command(device, SSD1306_SETSTARTLINE | 0x00);
+    ssd1306_write_command(device, SSD1306_CHARGEPUMP);
+    ssd1306_write_command(device, 0x14);
+    ssd1306_write_command(device, SSD1306_MEMORYMODE);
+    ssd1306_write_command(device, 0x00);
+    ssd1306_write_command(device, SSD1306_SEGREMAP | 0x01);
+    ssd1306_write_command(device, SSD1306_COMSCANDEC);
+    ssd1306_write_command(device, SSD1306_SETCOMPINS);
+    ssd1306_write_command(device, 0x12);
+    ssd1306_write_command(device, SSD1306_SETCONTRAST);
+    ssd1306_write_command(device, 0xCF);
+    ssd1306_write_command(device, SSD1306_SETPRECHARGE);
+    ssd1306_write_command(device, 0xF1);
+    ssd1306_write_command(device, SSD1306_SETVCOMDETECT);
+    ssd1306_write_command(device, 0x40);
+    ssd1306_write_command(device, SSD1306_DISPLAYALLON_RESUME);
+    ssd1306_write_command(device, SSD1306_NORMALDISPLAY);
+    ssd1306_write_command(device, SSD1306_DISPLAYON);
+}
+
+bool oled_init(const oled_config_t *config) {
+    if (!config || config->num_displays == 0 || config->num_displays > OLED_MAX_DISPLAYS) {
+        ESP_LOGE(TAG, "Invalid configuration");
+        return false;
+    }
+    
+    // Store configuration
+    memcpy(&active_config, config, sizeof(oled_config_t));
+    
+    ESP_LOGI(TAG, "Initializing %d OLED display(s)...", config->num_displays);
+    ESP_LOGI(TAG, "Pins - MOSI:%d CLK:%d DC:%d RST:%d", 
+             config->mosi_pin, config->clk_pin, config->dc_pin, config->rst_pin);
     
     // Configure DC and RESET pins
     gpio_config_t io_conf = {};
-    io_conf.pin_bit_mask = (1ULL << OLED_PIN_DC) | (1ULL << OLED_PIN_RESET);
+    io_conf.pin_bit_mask = (1ULL << config->dc_pin) | (1ULL << config->rst_pin);
     io_conf.mode = GPIO_MODE_OUTPUT;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     io_conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
@@ -191,16 +275,16 @@ bool oled_init(void) {
     gpio_config(&io_conf);
     
     // Reset displays
-    gpio_set_level((gpio_num_t)OLED_PIN_RESET, 0);
+    gpio_set_level((gpio_num_t)config->rst_pin, 0);
     vTaskDelay(pdMS_TO_TICKS(10));
-    gpio_set_level((gpio_num_t)OLED_PIN_RESET, 1);
+    gpio_set_level((gpio_num_t)config->rst_pin, 1);
     vTaskDelay(pdMS_TO_TICKS(10));
     
     // Configure SPI bus (shared)
     spi_bus_config_t bus_cfg = {};
-    bus_cfg.mosi_io_num = OLED_PIN_MOSI;
+    bus_cfg.mosi_io_num = config->mosi_pin;
     bus_cfg.miso_io_num = -1;
-    bus_cfg.sclk_io_num = OLED_PIN_CLK;
+    bus_cfg.sclk_io_num = config->clk_pin;
     bus_cfg.quadwp_io_num = -1;
     bus_cfg.quadhd_io_num = -1;
     bus_cfg.max_transfer_sz = OLED_WIDTH * OLED_HEIGHT / 8;
@@ -211,97 +295,37 @@ bool oled_init(void) {
         return false;
     }
     
-    // Configure SPI device 1 (CS1)
-    spi_device_interface_config_t dev_cfg_1 = {};
-    dev_cfg_1.clock_speed_hz = 10 * 1000 * 1000;  // 10 MHz
-    dev_cfg_1.mode = 0;
-    dev_cfg_1.spics_io_num = OLED_PIN_CS1;
-    dev_cfg_1.queue_size = 1;
-    
-    ret = spi_bus_add_device(SPI2_HOST, &dev_cfg_1, &spi_device_1);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to add SPI device 1: %s", esp_err_to_name(ret));
-        return false;
+    // Initialize each display
+    for (uint8_t i = 0; i < config->num_displays; i++) {
+        const oled_display_config_t *disp = &config->displays[i];
+        
+        ESP_LOGI(TAG, "Display %d: CS=%d, Table='%s'", 
+                 disp->id, disp->cs_pin, 
+                 disp->table_name[0] ? disp->table_name : "none");
+        
+        // Configure SPI device
+        spi_device_interface_config_t dev_cfg = {};
+        dev_cfg.clock_speed_hz = 10 * 1000 * 1000;  // 10 MHz
+        dev_cfg.mode = 0;
+        dev_cfg.spics_io_num = disp->cs_pin;
+        dev_cfg.queue_size = 1;
+        
+        ret = spi_bus_add_device(SPI2_HOST, &dev_cfg, &spi_devices[i]);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to add SPI device %d: %s", i, esp_err_to_name(ret));
+            return false;
+        }
+        
+        // Initialize SSD1306
+        ESP_LOGI(TAG, "Initializing Display %d...", disp->id);
+        ssd1306_init_display(spi_devices[i]);
+        
+        // Clear display
+        memset(display_buffers[i], 0, sizeof(display_buffers[i]));
+        oled_clear(i);
     }
     
-    // Configure SPI device 2 (CS2)
-    spi_device_interface_config_t dev_cfg_2 = {};
-    dev_cfg_2.clock_speed_hz = 10 * 1000 * 1000;  // 10 MHz
-    dev_cfg_2.mode = 0;
-    dev_cfg_2.spics_io_num = OLED_PIN_CS2;
-    dev_cfg_2.queue_size = 1;
-    
-    ret = spi_bus_add_device(SPI2_HOST, &dev_cfg_2, &spi_device_2);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to add SPI device 2: %s", esp_err_to_name(ret));
-        return false;
-    }
-    
-    ESP_LOGI(TAG, "SPI bus configured with 2 devices");
-    
-    // Initialize SSD1306 Display 1
-    ESP_LOGI(TAG, "Initializing Display 1...");
-    ssd1306_write_command(spi_device_1, SSD1306_DISPLAYOFF);
-    ssd1306_write_command(spi_device_1, SSD1306_SETDISPLAYCLOCKDIV);
-    ssd1306_write_command(spi_device_1, 0x80);
-    ssd1306_write_command(spi_device_1, SSD1306_SETMULTIPLEX);
-    ssd1306_write_command(spi_device_1, 0x3F);
-    ssd1306_write_command(spi_device_1, SSD1306_SETDISPLAYOFFSET);
-    ssd1306_write_command(spi_device_1, 0x00);
-    ssd1306_write_command(spi_device_1, SSD1306_SETSTARTLINE | 0x00);
-    ssd1306_write_command(spi_device_1, SSD1306_CHARGEPUMP);
-    ssd1306_write_command(spi_device_1, 0x14);
-    ssd1306_write_command(spi_device_1, SSD1306_MEMORYMODE);
-    ssd1306_write_command(spi_device_1, 0x00);
-    ssd1306_write_command(spi_device_1, SSD1306_SEGREMAP | 0x01);
-    ssd1306_write_command(spi_device_1, SSD1306_COMSCANDEC);
-    ssd1306_write_command(spi_device_1, SSD1306_SETCOMPINS);
-    ssd1306_write_command(spi_device_1, 0x12);
-    ssd1306_write_command(spi_device_1, SSD1306_SETCONTRAST);
-    ssd1306_write_command(spi_device_1, 0xCF);
-    ssd1306_write_command(spi_device_1, SSD1306_SETPRECHARGE);
-    ssd1306_write_command(spi_device_1, 0xF1);
-    ssd1306_write_command(spi_device_1, SSD1306_SETVCOMDETECT);
-    ssd1306_write_command(spi_device_1, 0x40);
-    ssd1306_write_command(spi_device_1, SSD1306_DISPLAYALLON_RESUME);
-    ssd1306_write_command(spi_device_1, SSD1306_NORMALDISPLAY);
-    ssd1306_write_command(spi_device_1, SSD1306_DISPLAYON);
-    
-    // Initialize SSD1306 Display 2
-    ESP_LOGI(TAG, "Initializing Display 2...");
-    ssd1306_write_command(spi_device_2, SSD1306_DISPLAYOFF);
-    ssd1306_write_command(spi_device_2, SSD1306_SETDISPLAYCLOCKDIV);
-    ssd1306_write_command(spi_device_2, 0x80);
-    ssd1306_write_command(spi_device_2, SSD1306_SETMULTIPLEX);
-    ssd1306_write_command(spi_device_2, 0x3F);
-    ssd1306_write_command(spi_device_2, SSD1306_SETDISPLAYOFFSET);
-    ssd1306_write_command(spi_device_2, 0x00);
-    ssd1306_write_command(spi_device_2, SSD1306_SETSTARTLINE | 0x00);
-    ssd1306_write_command(spi_device_2, SSD1306_CHARGEPUMP);
-    ssd1306_write_command(spi_device_2, 0x14);
-    ssd1306_write_command(spi_device_2, SSD1306_MEMORYMODE);
-    ssd1306_write_command(spi_device_2, 0x00);
-    ssd1306_write_command(spi_device_2, SSD1306_SEGREMAP | 0x01);
-    ssd1306_write_command(spi_device_2, SSD1306_COMSCANDEC);
-    ssd1306_write_command(spi_device_2, SSD1306_SETCOMPINS);
-    ssd1306_write_command(spi_device_2, 0x12);
-    ssd1306_write_command(spi_device_2, SSD1306_SETCONTRAST);
-    ssd1306_write_command(spi_device_2, 0xCF);
-    ssd1306_write_command(spi_device_2, SSD1306_SETPRECHARGE);
-    ssd1306_write_command(spi_device_2, 0xF1);
-    ssd1306_write_command(spi_device_2, SSD1306_SETVCOMDETECT);
-    ssd1306_write_command(spi_device_2, 0x40);
-    ssd1306_write_command(spi_device_2, SSD1306_DISPLAYALLON_RESUME);
-    ssd1306_write_command(spi_device_2, SSD1306_NORMALDISPLAY);
-    ssd1306_write_command(spi_device_2, SSD1306_DISPLAYON);
-    
-    ESP_LOGI(TAG, "Both OLED displays initialized successfully!");
-    
-    // Clear displays
-    memset(display_buffer_1, 0, sizeof(display_buffer_1));
-    memset(display_buffer_2, 0, sizeof(display_buffer_2));
-    oled_clear(OLED_DISPLAY_1);
-    oled_clear(OLED_DISPLAY_2);
+    ESP_LOGI(TAG, "All OLED displays initialized successfully!");
     
     is_initialized = true;
     return true;
@@ -355,36 +379,90 @@ void oled_show_text(uint8_t display_id, const char *text, int16_t x, int16_t y, 
     }
 }
 
+void oled_set_audio_levels(float left_rms, float right_rms, float peak) {
+    if (left_rms < 0.0f) left_rms = 0.0f;
+    if (right_rms < 0.0f) right_rms = 0.0f;
+    if (peak < 0.0f) peak = 0.0f;
+    if (left_rms > 1.0f) left_rms = 1.0f;
+    if (right_rms > 1.0f) right_rms = 1.0f;
+    if (peak > 1.0f) peak = 1.0f;
+
+    audio_rms_left = left_rms;
+    audio_rms_right = right_rms;
+    audio_peak = peak;
+}
+
+void oled_set_table_data(const float *data, uint32_t length) {
+    if (!data || length == 0) {
+        table_cache_len = 0;
+        return;
+    }
+
+    uint32_t copy_len = (length > OLED_WIDTH) ? OLED_WIDTH : length;
+    for (uint32_t i = 0; i < copy_len; i++) {
+        float v = data[i];
+        if (v < 0.0f) v = 0.0f;
+        if (v > 1.0f) v = 1.0f;
+        table_cache[i] = v;
+    }
+    for (uint32_t i = copy_len; i < OLED_WIDTH; i++) {
+        table_cache[i] = 0.0f;
+    }
+    table_cache_len = copy_len;
+}
+
 void oled_update_display(uint8_t display_id) {
-    if (!is_initialized) return;
+    if (!is_initialized || display_id >= active_config.num_displays) return;
     
     uint8_t *buffer = get_display_buffer(display_id);
     spi_device_handle_t device = get_spi_device(display_id);
-    uint32_t *counter = (display_id == OLED_DISPLAY_1) ? &update_counter_1 : &update_counter_2;
     
-    (*counter)++;
+    update_counters[display_id]++;
     
     // Clear buffer
     memset(buffer, 0, OLED_WIDTH * OLED_HEIGHT / 8);
     
-    // Display title
-    if (display_id == OLED_DISPLAY_1) {
-        oled_show_text(display_id, "Display 1", 10, 0, 1);
+    const oled_display_config_t *disp_cfg = &active_config.displays[display_id];
+    
+    // Check if this display has a table assigned
+    if (disp_cfg->table_name[0] != '\0') {
+        // Table waveform view - draw connected line segments
+        // Map 0..1 to bottom..top of display
+        int base_y = OLED_HEIGHT - 1;
+        int prev_x = -1, prev_y = -1;
+        
+        for (int x = 0; x < (int)OLED_WIDTH; x++) {
+            float v = (x < (int)table_cache_len) ? table_cache[x] : 0.0f;
+            // Map 0.0->1.0 to display height (0 at bottom, 63 at top)
+            int y = base_y - (int)(v * (OLED_HEIGHT - 1));
+            if (y < 0) y = 0;
+            if (y > base_y) y = base_y;
+            
+            // Draw line from previous point to current point
+            if (prev_x >= 0) {
+                oled_draw_line(buffer, prev_x, prev_y, x, y);
+            } else {
+                oled_set_pixel(buffer, x, y, true);
+            }
+            
+            prev_x = x;
+            prev_y = y;
+        }
     } else {
-        oled_show_text(display_id, "Display 2", 10, 0, 1);
+        // Text info display
+        char line[32];
+        snprintf(line, sizeof(line), "Display %d", disp_cfg->id);
+        oled_show_text(display_id, line, 10, 0, 1);
+        
+        oled_show_text(display_id, "Ai de mim!", 5, 20, 1);
+
+        snprintf(line, sizeof(line), "Count: %lu", update_counters[display_id]);
+        oled_show_text(display_id, line, 5, 40, 1);
+
+        uint32_t random_val = esp_random() % 1000;
+        snprintf(line, sizeof(line), "Rnd: %lu", random_val);
+        oled_show_text(display_id, line, 5, 50, 1);
     }
-    
-    // Hello World message
-    oled_show_text(display_id, "Hello World!", 5, 20, 1);
-    
-    // Counter and random info
-    char info[32];
-    snprintf(info, sizeof(info), "Count: %lu", *counter);
-    oled_show_text(display_id, info, 5, 40, 1);
-    
-    uint32_t random_val = esp_random() % 1000;
-    snprintf(info, sizeof(info), "Rnd: %lu", random_val);
-    oled_show_text(display_id, info, 5, 50, 1);
     
     // Send buffer to display
     ssd1306_write_command(device, SSD1306_COLUMNADDR);

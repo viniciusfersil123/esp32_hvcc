@@ -59,6 +59,30 @@ def generate_controls_code(project_dir):
         else:
             print("ERROR: Controls code generation failed")
             
+    except Exception as e:
+        print(f"WARNING: Controls generation failed: {e}")
+
+def generate_board_config_embed(project_dir):
+    """Generate embedded board_config.json as C code"""
+    
+    print("Generating embedded board_config.json...")
+    
+    # Run the board config embedder
+    try:
+        result = subprocess.run(
+            ['python3', str(project_dir / 'generate_board_config_embed.py')],
+            cwd=str(project_dir),
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        print("✓ Board config embedded successfully")
+    except subprocess.CalledProcessError as e:
+        print(f"WARNING: Failed to embed board config: {e}")
+        if e.stderr:
+            print(e.stderr)
+
+            
     except ImportError as e:
         print(f"WARNING: Could not import jinja2: {e}")
         print("Install with: pip3 install jinja2")
@@ -150,6 +174,10 @@ def compile_pd_patch(*args, **kwargs):
         # Generate controls code after HVCC compilation
         print("")
         generate_controls_code(project_dir)
+        
+        # Generate embedded board config
+        print("")
+        generate_board_config_embed(project_dir)
         
     except subprocess.CalledProcessError as e:
         print("=" * 60)

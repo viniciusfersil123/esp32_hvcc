@@ -18,5 +18,25 @@
         "invert": 1
       }
     ]
+  },
+  "oled": {
+    "spi": {
+      "mosi": 23,
+      "clk": 18,
+      "dc": 16,
+      "rst": 17
+    },
+    "displays": [
+      {
+        "id": 1,
+        "cs_pin": 5,
+        "table_name": "array1"
+      },
+      {
+        "id": 2,
+        "cs_pin": 15,
+        "table_name": "array1"
+      }
+    ]
   }
 }
