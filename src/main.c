@@ -29,6 +29,9 @@
 // Generated controls code (ADC, buttons, etc.)
 #include "controls_generated.h"
 
+// OLED Display
+#include "oled_display.h"
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
@@ -236,6 +239,20 @@ static void control_task(void *arg) {
 }
 
 /**
+ * @brief OLED display update task
+ * 
+ * Periodically updates the OLED display with Hello World and random info
+ */
+static void oled_task(void *arg) {
+    ESP_LOGI(TAG, "OLED task started");
+    
+    while (true) {
+        oled_update_display();
+        vTaskDelay(pdMS_TO_TICKS(1000));  // Update every 1 second
+    }
+}
+
+/**
  * @brief Main audio processing and output loop
  * 
  * Continuously processes audio through Heavy context and outputs to I2S.
@@ -328,6 +345,14 @@ void app_main(void) {
         xTaskCreate(control_task, "controls", 2048, audio_sys.heavy_context, 5, NULL);
     } else {
         ESP_LOGW(TAG, "No controls initialized - skipping controls task");
+    }
+    
+    // Initialize and start OLED display
+    if (oled_init()) {
+        ESP_LOGI(TAG, "OLED display initialized - starting update task");
+        xTaskCreate(oled_task, "oled_display", 4096, NULL, 3, NULL);
+    } else {
+        ESP_LOGW(TAG, "OLED initialization failed - display will not be available");
     }
     
     ESP_LOGI(TAG, "All systems ready - starting audio output");
