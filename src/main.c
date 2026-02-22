@@ -241,13 +241,15 @@ static void control_task(void *arg) {
 /**
  * @brief OLED display update task
  * 
- * Periodically updates the OLED display with Hello World and random info
+ * Periodically updates both OLED displays with Hello World and random info
  */
 static void oled_task(void *arg) {
-    ESP_LOGI(TAG, "OLED task started");
+    ESP_LOGI(TAG, "OLED task started - updating 2 displays every 1 second");
     
     while (true) {
-        oled_update_display();
+        // Update both displays
+        oled_update_display(OLED_DISPLAY_1);
+        oled_update_display(OLED_DISPLAY_2);
         vTaskDelay(pdMS_TO_TICKS(1000));  // Update every 1 second
     }
 }
