@@ -35,6 +35,9 @@
 // OLED Display
 #include "oled_display.h"
 
+// MIDI Handler
+#include "midi_handler.h"
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
@@ -245,6 +248,64 @@ static void control_task(void *arg) {
 static oled_config_t oled_config = {0};
 static hv_uint32_t oled_table_hashes[OLED_MAX_DISPLAYS] = {0};
 
+// MIDI configuration loaded from JSON
+static midi_config_t midi_config = {0};
+
+/**
+ * @brief Load MIDI configuration from embedded board_config.json
+ */
+static bool load_midi_config(void) {
+    extern const char board_config_json_start[];
+    cJSON *root = cJSON_Parse(board_config_json_start);
+    if (!root) {
+        ESP_LOGE(TAG, "Failed to parse board_config for MIDI");
+        return false;
+    }
+
+    cJSON *midi = cJSON_GetObjectItem(root, "midi");
+    if (!midi) {
+        ESP_LOGI(TAG, "No MIDI configuration found in board_config");
+        cJSON_Delete(root);
+        return false;
+    }
+
+    // Parse transport type
+    cJSON *transport = cJSON_GetObjectItem(midi, "transport");
+    if (transport && cJSON_IsString(transport)) {
+        const char *transport_str = transport->valuestring;
+        if (strcmp(transport_str, "uart") == 0) {
+            midi_config.transport = MIDI_TRANSPORT_UART;
+        } else if (strcmp(transport_str, "usb") == 0) {
+            midi_config.transport = MIDI_TRANSPORT_USB;
+        } else {
+            midi_config.transport = MIDI_TRANSPORT_NONE;
+        }
+    }
+
+    // Parse UART pins
+    cJSON *uart_tx = cJSON_GetObjectItem(midi, "uart_tx_pin");
+    cJSON *uart_rx = cJSON_GetObjectItem(midi, "uart_rx_pin");
+    if (uart_tx && cJSON_IsNumber(uart_tx)) {
+        midi_config.uart_tx_pin = uart_tx->valueint;
+    }
+    if (uart_rx && cJSON_IsNumber(uart_rx)) {
+        midi_config.uart_rx_pin = uart_rx->valueint;
+    }
+
+    // Parse enable flags
+    cJSON *enable_input = cJSON_GetObjectItem(midi, "enable_input");
+    cJSON *enable_output = cJSON_GetObjectItem(midi, "enable_output");
+    midi_config.enable_input = (enable_input && cJSON_IsBool(enable_input)) ? cJSON_IsTrue(enable_input) : false;
+    midi_config.enable_output = (enable_output && cJSON_IsBool(enable_output)) ? cJSON_IsTrue(enable_output) : false;
+
+    cJSON_Delete(root);
+
+    ESP_LOGI(TAG, "MIDI config loaded: transport=%d, TX=%d, RX=%d, in=%d, out=%d",
+             midi_config.transport, midi_config.uart_tx_pin, midi_config.uart_rx_pin,
+             midi_config.enable_input, midi_config.enable_output);
+    return true;
+}
+
 /**
  * @brief Load OLED configuration from embedded board_config.json
  */
@@ -333,6 +394,27 @@ static bool load_oled_config(void) {
 }
 
 /**
+ * @brief Heavy send hook - handles outgoing messages from Pure Data
+ * 
+ * Called when messages are sent to [s receiver] objects in the patch.
+ * Routes MIDI output messages and can handle custom receivers.
+ */
+static void heavy_send_hook(HeavyContextInterface *context, const char *receiverName, 
+                           uint32_t receiverHash, const HvMessage *m) {
+    // Handle MIDI output messages
+    if (midi_is_ready()) {
+        midi_handle_heavy_send(receiverHash, m);
+    }
+    
+    // Add custom receiver handling here if needed
+    // For example:
+    // if (receiverHash == HV_HASH_MYRECEIVER) {
+    //     float value = hv_msg_getFloat(m, 0);
+    //     // Do something with value
+    // }
+}
+
+/**
  * @brief OLED display update task
  * 
  * Periodically updates both OLED displays with Hello World and random info
@@ -374,6 +456,11 @@ static void audio_processing_loop(void) {
     size_t bytes_written;
     
     while (true) {
+        // Process MIDI input/output
+        if (midi_is_ready()) {
+            midi_process();
+        }
+        
         // Process audio block through Heavy (Pure Data) patch
         int frames_processed = hv_processInline(
             audio_sys.heavy_context,
@@ -483,6 +570,15 @@ void app_main(void) {
         xTaskCreate(oled_task, "oled_display", 4096, NULL, 3, NULL);
     } else {
         ESP_LOGW(TAG, "OLED initialization failed - display will not be available");
+    }
+
+    // Load MIDI configuration and initialize
+    if (load_midi_config() && midi_init(&midi_config, audio_sys.heavy_context)) {
+        ESP_LOGI(TAG, "MIDI initialized successfully");
+        // Set send hook to handle MIDI output from Pure Data
+        hv_setSendHook(audio_sys.heavy_context, heavy_send_hook);
+    } else {
+        ESP_LOGI(TAG, "MIDI not configured or initialization failed");
     }
     
     ESP_LOGI(TAG, "All systems ready - starting audio output");

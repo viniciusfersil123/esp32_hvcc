@@ -20,7 +20,7 @@
 #define ADC_KNOB1_PIN           GPIO_NUM_33
 #define ADC_KNOB1_UNIT          ADC_UNIT_1
 #define ADC_KNOB1_CHANNEL       ADC_CHANNEL_5
-#define ADC_KNOB1_RECEIVER      "knob2"
+#define ADC_KNOB1_RECEIVER      "knob1"
 #define ADC_KNOB1_DESCRIPTION  "Main knob control"
 
 

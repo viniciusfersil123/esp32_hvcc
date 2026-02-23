@@ -6,7 +6,7 @@
       {
         "name": "knob1",
         "pin": 33,
-        "receiver": "knob2",
+        "receiver": "knob1",
         "description": "Main knob control"
       }
     ],
@@ -25,22 +25,12 @@
       "clk": 18,
       "dc": 16,
       "rst": 17
-    },
-    "displays": [
-      {
-        "id": 1,
-        "cs_pin": 5,
-        "table_name": "pitch11",
-        "value_min": 0,
-        "value_max": 1000
-      },
-      {
-        "id": 2,
-        "cs_pin": 15,
-        "table_name": "waveform11",
-        "value_min": -1,
-        "value_max": 1
-      }
-    ]
+    }
+  },
+  "midi": {
+    "transport": "uart",
+    "uart_rx_pin": 3,
+    "enable_input": true,
+    "enable_output": true
   }
 }

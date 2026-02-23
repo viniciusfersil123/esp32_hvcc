@@ -14,8 +14,8 @@
  * PERFORMANCE OF THIS SOFTWARE.
  */
 
-#ifndef _HEAVY_CONTROL_SYSTEM_H_
-#define _HEAVY_CONTROL_SYSTEM_H_
+#ifndef _HEAVY_CONTROL_CAST_H_
+#define _HEAVY_CONTROL_CAST_H_
 
 #include "HvHeavyInternal.h"
 
@@ -23,11 +23,17 @@
 extern "C" {
 #endif
 
-void cSystem_onMessage(HeavyContextInterface *_c, void *o, int letIn, const HvMessage *m,
+typedef enum CastType {
+  HV_CAST_BANG,
+  HV_CAST_FLOAT,
+  HV_CAST_SYMBOL
+} CastType;
+
+void cCast_onMessage(HeavyContextInterface *_c, CastType castType, int letIn, const HvMessage *m,
     void (*sendMessage)(HeavyContextInterface *, int, const HvMessage *));
 
 #ifdef __cplusplus
 } // extern "C"
 #endif
 
-#endif // _HEAVY_CONTROL_SYSTEM_H_
+#endif // _HEAVY_CONTROL_CAST_H_
