@@ -30,6 +30,8 @@ typedef struct {
     uint8_t id;              ///< Display ID (0 or 1)
     uint8_t cs_pin;          ///< Chip Select pin
     char table_name[32];     ///< Pure Data table name to display (empty if none)
+    float value_min;         ///< Minimum value for scaling (default: 0)
+    float value_max;         ///< Maximum value for scaling (default: 1)
 } oled_display_config_t;
 
 /**

@@ -27,8 +27,14 @@ static uint32_t update_counters[OLED_MAX_DISPLAYS] = {0, 0};
 static float audio_rms_left = 0.0f;
 static float audio_rms_right = 0.0f;
 static float audio_peak = 0.0f;
-static float table_cache[OLED_WIDTH] = {0.0f};
+
+// Table cache - increased to handle large tables (e.g., 259 samples)
+#define TABLE_CACHE_MAX 512
+static float table_cache[TABLE_CACHE_MAX] = {0.0f};
 static uint32_t table_cache_len = 0;
+static float table_min = 0.0f;
+static float table_max = 1.0f;
+static uint8_t current_table_display = 0;  // Which display is currently using the table cache
 
 // Get appropriate buffer for display ID
 static inline uint8_t *get_display_buffer(uint8_t display_id) {
@@ -398,14 +404,29 @@ void oled_set_table_data(const float *data, uint32_t length) {
         return;
     }
 
-    uint32_t copy_len = (length > OLED_WIDTH) ? OLED_WIDTH : length;
+    // Store up to TABLE_CACHE_MAX samples
+    uint32_t copy_len = (length > TABLE_CACHE_MAX) ? TABLE_CACHE_MAX : length;
+    
+    // Auto-scale: find min/max in the data
+    float min_val = data[0];
+    float max_val = data[0];
     for (uint32_t i = 0; i < copy_len; i++) {
-        float v = data[i];
-        if (v < 0.0f) v = 0.0f;
-        if (v > 1.0f) v = 1.0f;
-        table_cache[i] = v;
+        if (data[i] < min_val) min_val = data[i];
+        if (data[i] > max_val) max_val = data[i];
     }
-    for (uint32_t i = copy_len; i < OLED_WIDTH; i++) {
+    table_min = min_val;
+    table_max = max_val;
+    
+    // Avoid division by zero
+    if (table_max <= table_min) {
+        table_max = table_min + 1.0f;
+    }
+    
+    // Store raw data without clamping
+    for (uint32_t i = 0; i < copy_len; i++) {
+        table_cache[i] = data[i];
+    }
+    for (uint32_t i = copy_len; i < TABLE_CACHE_MAX; i++) {
         table_cache[i] = 0.0f;
     }
     table_cache_len = copy_len;
@@ -419,6 +440,8 @@ void oled_update_display(uint8_t display_id) {
     
     update_counters[display_id]++;
     
+    current_table_display = display_id;
+    
     // Clear buffer
     memset(buffer, 0, OLED_WIDTH * OLED_HEIGHT / 8);
     
@@ -427,14 +450,47 @@ void oled_update_display(uint8_t display_id) {
     // Check if this display has a table assigned
     if (disp_cfg->table_name[0] != '\0') {
         // Table waveform view - draw connected line segments
-        // Map 0..1 to bottom..top of display
+        // Map table_min..table_max to bottom..top of display
         int base_y = OLED_HEIGHT - 1;
         int prev_x = -1, prev_y = -1;
         
+        // Handle horizontal scaling: fit all table_cache_len samples into OLED_WIDTH pixels
         for (int x = 0; x < (int)OLED_WIDTH; x++) {
-            float v = (x < (int)table_cache_len) ? table_cache[x] : 0.0f;
+            float v = 0.0f;
+            
+            if (table_cache_len > 0) {
+                if (table_cache_len <= OLED_WIDTH) {
+                    // Less data than pixels: direct mapping
+                    if (x < (int)table_cache_len) {
+                        v = table_cache[x];
+                    }
+                } else {
+                    // More data than pixels: use linear interpolation to resample
+                    // Map pixel x to sample position in the original data
+                    float sample_pos = (float)x * (table_cache_len - 1) / (OLED_WIDTH - 1);
+                    int idx0 = (int)sample_pos;
+                    int idx1 = idx0 + 1;
+                    float frac = sample_pos - idx0;
+                    
+                    if (idx1 >= (int)table_cache_len) {
+                        idx1 = table_cache_len - 1;
+                        frac = 0.0f;
+                    }
+                    
+                    // Linear interpolation between idx0 and idx1
+                    float v0 = table_cache[idx0];
+                    float v1 = table_cache[idx1];
+                    v = v0 + frac * (v1 - v0);
+                }
+            }
+            
+            // Scale value from [table_min, table_max] to [0, 1]
+            float scaled_v = (v - table_min) / (table_max - table_min);
+            // Clamp to display range
+            if (scaled_v < 0.0f) scaled_v = 0.0f;
+            if (scaled_v > 1.0f) scaled_v = 1.0f;
             // Map 0.0->1.0 to display height (0 at bottom, 63 at top)
-            int y = base_y - (int)(v * (OLED_HEIGHT - 1));
+            int y = base_y - (int)(scaled_v * (OLED_HEIGHT - 1));
             if (y < 0) y = 0;
             if (y > base_y) y = base_y;
             

@@ -304,6 +304,12 @@ static bool load_oled_config(void) {
         disp_cfg->id = cJSON_GetObjectItem(disp, "id")->valueint;
         disp_cfg->cs_pin = cJSON_GetObjectItem(disp, "cs_pin")->valueint;
         
+        // Parse value_min and value_max for scaling (optional, defaults to 0 and 1)
+        cJSON *value_min_item = cJSON_GetObjectItem(disp, "value_min");
+        cJSON *value_max_item = cJSON_GetObjectItem(disp, "value_max");
+        disp_cfg->value_min = (value_min_item) ? (float)value_min_item->valuedouble : 0.0f;
+        disp_cfg->value_max = (value_max_item) ? (float)value_max_item->valuedouble : 1.0f;
+        
         cJSON *table_name = cJSON_GetObjectItem(disp, "table_name");
         if (table_name && cJSON_IsString(table_name) && table_name->valuestring) {
             strncpy(disp_cfg->table_name, table_name->valuestring, sizeof(disp_cfg->table_name) - 1);

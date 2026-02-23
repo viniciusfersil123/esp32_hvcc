@@ -30,12 +30,16 @@
       {
         "id": 1,
         "cs_pin": 5,
-        "table_name": "pitch11"
+        "table_name": "pitch11",
+        "value_min": 0,
+        "value_max": 1000
       },
       {
         "id": 2,
         "cs_pin": 15,
-        "table_name": "waveform11"
+        "table_name": "waveform11",
+        "value_min": -1,
+        "value_max": 1
       }
     ]
   }

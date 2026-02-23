@@ -1,6 +1,6 @@
 // Auto-generated from board_config.json - DO NOT EDIT
 
 const char board_config_json_start[] = 
-"{\"board\":\"esp32dev\",\"sample_rate\":48000,\"controls\":{\"adcs\":[{\"name\":\"knob1\",\"pin\":33,\"receiver\":\"knob2\",\"description\":\"Main knob control\"}],\"buttons\":[{\"name\":\"button1\",\"pin\":32,\"receiver\":\"button1\",\"invert\":1}]},\"oled\":{\"spi\":{\"mosi\":23,\"clk\":18,\"dc\":16,\"rst\":17},\"displays\":[{\"id\":1,\"cs_pin\":5,\"table_name\":\"array1\"},{\"id\":2,\"cs_pin\":15,\"table_name\":\"array1\"}]}}";
+"{\"board\":\"esp32dev\",\"sample_rate\":48000,\"controls\":{\"adcs\":[{\"name\":\"knob1\",\"pin\":33,\"receiver\":\"knob2\",\"description\":\"Main knob control\"}],\"buttons\":[{\"name\":\"button1\",\"pin\":32,\"receiver\":\"button1\",\"invert\":1}]},\"oled\":{\"spi\":{\"mosi\":23,\"clk\":18,\"dc\":16,\"rst\":17},\"displays\":[{\"id\":1,\"cs_pin\":5,\"table_name\":\"pitch11\",\"value_min\":0,\"value_max\":1000},{\"id\":2,\"cs_pin\":15,\"table_name\":\"waveform11\",\"value_min\":-1,\"value_max\":1}]}}";
 
 const char board_config_json_end[] = "";
