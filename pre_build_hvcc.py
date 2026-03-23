@@ -207,9 +207,10 @@ def compile_pd_patch(*args, **kwargs):
         traceback.print_exc()
         sys.exit(1)
 
-# Register the pre-build action
-# Note: This runs before every build and cleans object files to force recompilation
-env.AddPreAction("$BUILD_DIR/${PROGNAME}.elf", compile_pd_patch)
+# Run generation immediately when the extra script is loaded.
+# This guarantees generated headers/sources exist before compile starts,
+# regardless of framework-specific build target naming.
+compile_pd_patch()
 
 # Add main.pd as a dependency so changes trigger rebuild
 project_dir = Path(env.get('PROJECT_DIR', os.getcwd()))
