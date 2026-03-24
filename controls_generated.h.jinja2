@@ -68,10 +68,14 @@ void controls_task(void *arg);
 // BUTTON CONTROL MAPPINGS
 // ============================================================================
 
+#define BTN_MODE_BANG            0
+#define BTN_MODE_FLOAT           1
+
 {% for btn in buttons %}
-#define BTN_{{ btn.name | upper }}_PIN          GPIO_NUM_{{ btn.pin }}
-#define BTN_{{ btn.name | upper }}_RECEIVER     "{{ btn.receiver }}"
-#define BTN_{{ btn.name | upper }}_INVERT       {{ btn.invert | default(1) }}
+#define BTN_{{ btn.define_name }}_PIN          GPIO_NUM_{{ btn.pin }}
+#define BTN_{{ btn.define_name }}_RECEIVER     "{{ btn.receiver }}"
+#define BTN_{{ btn.define_name }}_INVERT       {{ btn.invert | default(1) }}
+#define BTN_{{ btn.define_name }}_MODE         {{ btn.mode_define }}
 {% endfor %}
 
 {% endif %}

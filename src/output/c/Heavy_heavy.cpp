@@ -83,7 +83,10 @@ extern "C" {
 
 Heavy_heavy::Heavy_heavy(double sampleRate, int poolKb, int inQueueKb, int outQueueKb)
     : HeavyContext(sampleRate, poolKb, inQueueKb, outQueueKb) {
-  numBytes += sPhasor_k_init(&sPhasor_LWsMH0Pn, 220.0f, sampleRate);
+  numBytes += sLine_init(&sLine_EUY3HMe0);
+  numBytes += sPhasor_init(&sPhasor_vtgYXpLP, sampleRate);
+  numBytes += cVar_init_f(&cVar_32B9YPel, 1.0f);
+  numBytes += sVarf_init(&sVarf_VKQkIh2D, 0.0f, 0.0f, false);
   
 }
 
@@ -97,6 +100,14 @@ HvTable *Heavy_heavy::getTableForHash(hv_uint32_t tableHash) {
 
 void Heavy_heavy::scheduleMessageForReceiver(hv_uint32_t receiverHash, HvMessage *m) {
   switch (receiverHash) {
+    case 0xFB2DC5B6: { // button1
+      mq_addMessageByTimestamp(&mq, m, 0, &cReceive_MRF2HQw7_sendMessage);
+      break;
+    }
+    case 0x3A6EC41A: { // knob1
+      mq_addMessageByTimestamp(&mq, m, 0, &cReceive_wrogMZnX_sendMessage);
+      break;
+    }
     default: return;
   }
 }
@@ -124,6 +135,36 @@ int Heavy_heavy::getParameterInfo(int index, HvParameterInfo *info) {
  * Send Function Implementations
  */
 
+
+void Heavy_heavy::cVar_32B9YPel_sendMessage(HeavyContextInterface *_c, int letIn, const HvMessage *m) {
+  cBinop_k_onMessage(_c, NULL, HV_BINOP_EQ, 0.0f, 0, m, &cBinop_QfNtiEfd_sendMessage);
+  sVarf_onMessage(_c, &Context(_c)->sVarf_VKQkIh2D, m);
+}
+
+void Heavy_heavy::cBinop_QfNtiEfd_sendMessage(HeavyContextInterface *_c, int letIn, const HvMessage *m) {
+  cVar_onMessage(_c, &Context(_c)->cVar_32B9YPel, 1, m, &cVar_32B9YPel_sendMessage);
+}
+
+void Heavy_heavy::cBinop_VXfZg7Yk_sendMessage(HeavyContextInterface *_c, int letIn, const HvMessage *m) {
+  cMsg_MgaDT1Ah_sendMessage(_c, 0, m);
+}
+
+void Heavy_heavy::cMsg_MgaDT1Ah_sendMessage(HeavyContextInterface *_c, int letIn, const HvMessage *const n) {
+  HvMessage *m = nullptr;
+  m = HV_MESSAGE_ON_STACK(2);
+  msg_init(m, 2, msg_getTimestamp(n));
+  msg_setElementToFrom(m, 0, n, 0);
+  msg_setFloat(m, 1, 50.0f);
+  sLine_onMessage(_c, &Context(_c)->sLine_EUY3HMe0, 0, m, NULL);
+}
+
+void Heavy_heavy::cReceive_wrogMZnX_sendMessage(HeavyContextInterface *_c, int letIn, const HvMessage *m) {
+  cBinop_k_onMessage(_c, NULL, HV_BINOP_MULTIPLY, 127.0f, 0, m, &cBinop_VXfZg7Yk_sendMessage);
+}
+
+void Heavy_heavy::cReceive_MRF2HQw7_sendMessage(HeavyContextInterface *_c, int letIn, const HvMessage *m) {
+  cVar_onMessage(_c, &Context(_c)->cVar_32B9YPel, 0, m, &cVar_32B9YPel_sendMessage);
+}
 
 
 
@@ -180,7 +221,13 @@ int Heavy_heavy::process(float **inputBuffers, float **outputBuffers, int n) {
     __hv_zero_f(VOf(O1));
 
     // process all signal functions
-    __hv_phasor_k_f(&sPhasor_LWsMH0Pn, VOf(Bf0));
+    __hv_line_f(&sLine_EUY3HMe0, VOf(Bf0));
+    __hv_var_k_f(VOf(Bf1), 0.057762265046662f, 0.057762265046662f, 0.057762265046662f, 0.057762265046662f, 0.057762265046662f, 0.057762265046662f, 0.057762265046662f, 0.057762265046662f);
+    __hv_mul_f(VIf(Bf0), VIf(Bf1), VOf(Bf1));
+    __hv_exp_f(VIf(Bf1), VOf(Bf1));
+    __hv_var_k_f(VOf(Bf0), 8.175798915643707f, 8.175798915643707f, 8.175798915643707f, 8.175798915643707f, 8.175798915643707f, 8.175798915643707f, 8.175798915643707f, 8.175798915643707f);
+    __hv_mul_f(VIf(Bf1), VIf(Bf0), VOf(Bf0));
+    __hv_phasor_f(&sPhasor_vtgYXpLP, VIf(Bf0), VOf(Bf0));
     __hv_var_k_f(VOf(Bf1), 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f);
     __hv_sub_f(VIf(Bf0), VIf(Bf1), VOf(Bf1));
     __hv_abs_f(VIf(Bf1), VOf(Bf1));
@@ -197,8 +244,10 @@ int Heavy_heavy::process(float **inputBuffers, float **outputBuffers, int n) {
     __hv_fma_f(VIf(Bf0), VIf(Bf3), VIf(Bf1), VOf(Bf1));
     __hv_var_k_f(VOf(Bf3), 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f);
     __hv_mul_f(VIf(Bf1), VIf(Bf3), VOf(Bf3));
-    __hv_add_f(VIf(Bf3), VIf(O0), VOf(O0));
-    __hv_add_f(VIf(Bf3), VIf(O1), VOf(O1));
+    __hv_varread_f(&sVarf_VKQkIh2D, VOf(Bf1));
+    __hv_mul_f(VIf(Bf3), VIf(Bf1), VOf(Bf1));
+    __hv_add_f(VIf(Bf1), VIf(O1), VOf(O1));
+    __hv_add_f(VIf(Bf1), VIf(O0), VOf(O0));
 
     // save output vars to output buffer
     __hv_store_f(outputBuffers[0]+n, VIf(O0));

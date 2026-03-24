@@ -461,6 +461,9 @@ static void audio_processing_loop(void) {
             midi_process();
         }
         
+        // Poll ADC controls (knobs, etc.) - synchronized with audio block timing
+        controls_poll_adc(audio_sys.heavy_context);
+        
         // Process audio block through Heavy (Pure Data) patch
         int frames_processed = hv_processInline(
             audio_sys.heavy_context,
@@ -558,8 +561,11 @@ void app_main(void) {
     }
 
     if (adc_ok || btn_ok) {
-        // Start control input task with Heavy context
-        xTaskCreate(control_task, "controls", 2048, audio_sys.heavy_context, 5, NULL);
+        // Start button control polling task (buttons need frequent debouncing)
+        // ADC polling is now done in the main audio loop for synchronized sampling
+        if (btn_ok) {
+            xTaskCreate(control_task, "controls", 2048, audio_sys.heavy_context, 5, NULL);
+        }
     } else {
         ESP_LOGW(TAG, "No controls initialized - skipping controls task");
     }

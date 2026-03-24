@@ -98,6 +98,7 @@ typedef struct {
     const char *receiver;
     hv_uint32_t hash;
     bool invert;
+    int mode;
     bool stable_state;
     bool last_sample;
     uint8_t stable_count;
@@ -110,6 +111,7 @@ button_control_t button_controls[NUM_BUTTONS] = {
         .receiver = BTN_BUTTON1_RECEIVER,
         .hash = 0,
         .invert = (BTN_BUTTON1_INVERT != 0),
+        .mode = BTN_BUTTON1_MODE,
         .stable_state = false,
         .last_sample = false,
         .stable_count = 0,
@@ -154,7 +156,7 @@ bool controls_init_buttons(void) {
         button_controls[i].last_sample = pressed;
         button_controls[i].stable_count = BTN_DEBOUNCE_SAMPLES;
 
-        ESP_LOGI(TAG, "  [%d] %s -> %s (GPIO%d, invert=%d)",
+        ESP_LOGI(TAG, "  [%d] %s -> %s (GPIO%d, invert=%d, mode=%s)",
                  i,
 
                  i == 0 ? "button1" :
@@ -162,7 +164,8 @@ bool controls_init_buttons(void) {
                  "?",
                  button_controls[i].receiver,
                  button_controls[i].pin,
-                 button_controls[i].invert ? 1 : 0);
+             button_controls[i].invert ? 1 : 0,
+             button_controls[i].mode == BTN_MODE_BANG ? "bang" : "float");
     }
 
     ESP_LOGI(TAG, "Button controls initialized");
@@ -177,35 +180,40 @@ bool controls_init_buttons(void) {
 
 
 
-/**
- * @brief Controls polling task
- */
-void controls_task(void *arg) {
+// ============================================================================
+// ADC POLLING (call from audio loop for synchronized sampling)
+// ============================================================================
+
+void controls_poll_adc(HeavyContextInterface *hv_ctx) {
+    // Poll each ADC
+    for (int i = 0; i < NUM_ADCS; i++) {
+        int adc_raw = 0;
+        esp_err_t ret = adc_oneshot_read(adc_handle, adc_controls[i].channel, &adc_raw);
+        
+        if (ret == ESP_OK) {
+            // Convert raw (0-4095) to float (0.0-1.0)
+            float value = (float)adc_raw / 4095.0f;
+            
+            // Send to Pure Data receiver
+            hv_sendFloatToReceiver(hv_ctx, adc_controls[i].hash, value);
+        } else {
+            ESP_LOGW(TAG, "ADC read failed for %s: %s", 
+                     adc_controls[i].name, esp_err_to_name(ret));
+        }
+    }
+}
+
+
+// ============================================================================
+// BUTTON POLLING TASK (debouncing - runs in separate task)
+// ============================================================================
+
+void controls_task_buttons_only(void *arg) {
     HeavyContextInterface *hv_ctx = (HeavyContextInterface *)arg;
     
-    ESP_LOGI(TAG, "Starting controls polling task");
+    ESP_LOGI(TAG, "Starting button controls polling task");
     
     while (true) {
-
-        // Poll each ADC
-        for (int i = 0; i < NUM_ADCS; i++) {
-            int adc_raw = 0;
-            esp_err_t ret = adc_oneshot_read(adc_handle, adc_controls[i].channel, &adc_raw);
-            
-            if (ret == ESP_OK) {
-                // Convert raw (0-4095) to float (0.0-1.0)
-                float value = (float)adc_raw / 4095.0f;
-                
-                // Send to Pure Data receiver
-                hv_sendFloatToReceiver(hv_ctx, adc_controls[i].hash, value);
-            } else {
-                ESP_LOGW(TAG, "ADC read failed for %s: %s", 
-                         adc_controls[i].name, esp_err_to_name(ret));
-            }
-        }
-
-
-
         // Poll each button (debounced)
         for (int i = 0; i < NUM_BUTTONS; i++) {
             bool raw = gpio_get_level(button_controls[i].pin);
@@ -225,11 +233,15 @@ void controls_task(void *arg) {
                     button_controls[i].stable_state = pressed;
                     // Only send event on press (when state becomes true/1)
                     if (button_controls[i].stable_state) {
-                        hv_sendFloatToReceiver(
-                            hv_ctx,
-                            button_controls[i].hash,
-                            1.0f
-                        );
+                        if (button_controls[i].mode == BTN_MODE_BANG) {
+                            hv_sendBangToReceiver(hv_ctx, button_controls[i].hash);
+                        } else {
+                            hv_sendFloatToReceiver(
+                                hv_ctx,
+                                button_controls[i].hash,
+                                1.0f
+                            );
+                        }
                     }
                 }
             }
@@ -239,5 +251,14 @@ void controls_task(void *arg) {
         // Poll rate
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+}
+
+
+// ============================================================================
+// LEGACY UNIFIED TASK (for backwards compatibility, calls button_only task)
+// ============================================================================
+
+void controls_task(void *arg) {
+    controls_task_buttons_only(arg);
 }
 

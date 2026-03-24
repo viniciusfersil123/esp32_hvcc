@@ -15,7 +15,8 @@
         "name": "button1",
         "pin": 32,
         "receiver": "button1",
-        "invert": 1
+        "invert": 1,
+        "mode": "bang"
       }
     ]
   },

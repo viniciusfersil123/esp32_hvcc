@@ -53,11 +53,31 @@ extern adc_oneshot_unit_handle_t adc_handle;
 bool controls_init_adc(HeavyContextInterface *hv_ctx);
 
 /**
- * @brief ADC polling task
+ * @brief Poll ADC values and send to Pure Data receivers
  * 
- * Reads ADC values and sends to Pure Data receivers
+ * Call this from the main audio loop for synchronized sampling
  * 
- * @param arg Unused
+ * @param hv_ctx Heavy context
+ */
+void controls_poll_adc(HeavyContextInterface *hv_ctx);
+
+/**
+ * @brief Button polling task (debouncing)
+ * 
+ * Reads button values with debouncing and sends to Pure Data receivers
+ * Should run as a separate task with 10ms polling interval
+ * 
+ * @param arg Heavy context
+ */
+void controls_task_buttons_only(void *arg);
+
+/**
+ * @brief Unified controls task (calls button polling)
+ * 
+ * Legacy compatibility function that delegates to button-only task
+ * ADC polling is now done in the main audio loop
+ * 
+ * @param arg Heavy context
  */
 void controls_task(void *arg);
 
@@ -68,10 +88,14 @@ void controls_task(void *arg);
 // BUTTON CONTROL MAPPINGS
 // ============================================================================
 
+#define BTN_MODE_BANG            0
+#define BTN_MODE_FLOAT           1
+
 
 #define BTN_BUTTON1_PIN          GPIO_NUM_32
 #define BTN_BUTTON1_RECEIVER     "button1"
 #define BTN_BUTTON1_INVERT       1
+#define BTN_BUTTON1_MODE         BTN_MODE_BANG
 
 
 

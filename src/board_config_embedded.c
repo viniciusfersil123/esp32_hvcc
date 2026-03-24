@@ -1,6 +1,6 @@
 // Auto-generated from board_config.json - DO NOT EDIT
 
 const char board_config_json_start[] = 
-"{\"board\":\"esp32dev\",\"sample_rate\":48000,\"controls\":{\"adcs\":[{\"name\":\"knob1\",\"pin\":33,\"receiver\":\"knob1\",\"description\":\"Main knob control\"}],\"buttons\":[{\"name\":\"button1\",\"pin\":32,\"receiver\":\"button1\",\"invert\":1}]},\"oled\":{\"spi\":{\"mosi\":23,\"clk\":18,\"dc\":16,\"rst\":17}},\"midi\":{\"transport\":\"uart\",\"uart_rx_pin\":3,\"enable_input\":true,\"enable_output\":true}}";
+"{\"board\":\"esp32dev\",\"sample_rate\":48000,\"controls\":{\"adcs\":[{\"name\":\"knob1\",\"pin\":33,\"receiver\":\"knob1\",\"description\":\"Main knob control\"}],\"buttons\":[{\"name\":\"button1\",\"pin\":32,\"receiver\":\"button1\",\"invert\":1,\"mode\":\"bang\"}]},\"oled\":{\"spi\":{\"mosi\":23,\"clk\":18,\"dc\":16,\"rst\":17}},\"midi\":{\"transport\":\"uart\",\"uart_rx_pin\":3,\"enable_input\":true,\"enable_output\":true}}";
 
 const char board_config_json_end[] = "";

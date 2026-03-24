@@ -54,6 +54,33 @@ def process_adc_config(adc_config):
     
     return adc_config
 
+
+def process_button_config(button_config):
+    """Process button config, apply defaults, and validate fields."""
+    pin = button_config.get('pin')
+    name = button_config.get('name')
+    receiver = button_config.get('receiver')
+
+    if pin is None:
+        raise ValueError("Button config must have a 'pin' field")
+    if not name:
+        raise ValueError("Button config must have a 'name' field")
+    if not receiver:
+        raise ValueError("Button config must have a 'receiver' field")
+
+    # Default behavior: send a bang on button press
+    mode = str(button_config.get('mode', 'bang')).strip().lower()
+    if mode not in {'bang', 'float'}:
+        raise ValueError(
+            f"Button '{name}' has invalid mode '{mode}'. Supported: 'bang', 'float'"
+        )
+
+    button_config['mode'] = mode
+    button_config['invert'] = int(button_config.get('invert', 1))
+    button_config['define_name'] = name.replace(' ', '_').upper()
+    button_config['mode_define'] = 'BTN_MODE_BANG' if mode == 'bang' else 'BTN_MODE_FLOAT'
+    return button_config
+
 def generate_controls_code(config_path, output_dir=None):
     """
     Generate controls code from board_config.json
@@ -88,6 +115,21 @@ def generate_controls_code(config_path, output_dir=None):
             processed_adcs.append(processed)
             print(f"  {processed['name']:20} (GPIO{processed['pin']:2d}) -> {processed['receiver']:15} [{processed['define_name']}]")
         adcs = processed_adcs
+    except ValueError as e:
+        print(f"ERROR: {e}")
+        return False
+
+    # Process button configs
+    try:
+        processed_buttons = []
+        for btn in buttons:
+            processed = process_button_config(btn.copy())
+            processed_buttons.append(processed)
+            print(
+                f"  {processed['name']:20} (GPIO{processed['pin']:2d}) -> "
+                f"{processed['receiver']:15} [mode={processed['mode']}, invert={processed['invert']}]"
+            )
+        buttons = processed_buttons
     except ValueError as e:
         print(f"ERROR: {e}")
         return False
