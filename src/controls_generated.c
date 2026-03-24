@@ -11,8 +11,28 @@
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "esp_adc/adc_oneshot.h"
+#include <math.h>
 
 static const char *TAG = "Controls";
+
+// ============================================================================
+// ADC FILTERING
+// ============================================================================
+
+// Exponential moving average filter for ADC values
+// Smooths out noise and timing jitter
+#define ADC_FILTER_ALPHA 0.2f  // 0.0-1.0: higher = more responsive, lower = more filtered
+
+typedef struct {
+    float filtered_value;  // Exponentially filtered value
+    float last_sent;       // Last value sent to Pure Data
+    uint8_t send_counter;  // Counter to reduce send frequency
+} adc_filter_state_t;
+
+static adc_filter_state_t adc_filter_state[NUM_ADCS];
+
+// Only send to Pure Data if change exceeds this threshold (0-1 scale)
+#define ADC_SEND_THRESHOLD 0.002f
 
 // ============================================================================
 // ADC CONTROL DATA
@@ -71,6 +91,11 @@ bool controls_init_adc(HeavyContextInterface *hv_ctx) {
         // Pre-compute receiver hashes
         adc_controls[i].hash = hv_stringToHash(adc_controls[i].receiver);
         
+        // Initialize filter state with zero value
+        adc_filter_state[i].filtered_value = 0.0f;
+        adc_filter_state[i].last_sent = 0.0f;
+        adc_filter_state[i].send_counter = 0;
+        
         ESP_LOGI(TAG, "  [%d] %s -> %s (GPIO%d)", 
                  i, adc_controls[i].name, adc_controls[i].receiver,
 
@@ -79,7 +104,7 @@ bool controls_init_adc(HeavyContextInterface *hv_ctx) {
                  0);
     }
     
-    ESP_LOGI(TAG, "ADC controls initialized");
+    ESP_LOGI(TAG, "ADC controls initialized with EMA filter (alpha=%.2f)", ADC_FILTER_ALPHA);
     return true;
 }
 
@@ -192,10 +217,22 @@ void controls_poll_adc(HeavyContextInterface *hv_ctx) {
         
         if (ret == ESP_OK) {
             // Convert raw (0-4095) to float (0.0-1.0)
-            float value = (float)adc_raw / 4095.0f;
+            float raw_value = (float)adc_raw / 4095.0f;
             
-            // Send to Pure Data receiver
-            hv_sendFloatToReceiver(hv_ctx, adc_controls[i].hash, value);
+            // Apply exponential moving average filter
+            // filtered = alpha * new + (1 - alpha) * old
+            // Higher alpha = more responsive, lower alpha = more filtered
+            adc_filter_state[i].filtered_value = 
+                ADC_FILTER_ALPHA * raw_value + 
+                (1.0f - ADC_FILTER_ALPHA) * adc_filter_state[i].filtered_value;
+            
+            // Only send to Pure Data if change exceeds threshold
+            // This reduces update frequency and prevents jitter
+            float delta = fabsf(adc_filter_state[i].filtered_value - adc_filter_state[i].last_sent);
+            if (delta >= ADC_SEND_THRESHOLD) {
+                adc_filter_state[i].last_sent = adc_filter_state[i].filtered_value;
+                hv_sendFloatToReceiver(hv_ctx, adc_controls[i].hash, adc_filter_state[i].filtered_value);
+            }
         } else {
             ESP_LOGW(TAG, "ADC read failed for %s: %s", 
                      adc_controls[i].name, esp_err_to_name(ret));
